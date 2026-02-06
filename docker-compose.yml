@@ -1,7 +1,9 @@
 services:
     rsshub:
-        # 改回普通版，因为它不带浏览器，不会产生本地版本冲突
-        image: diygod/rsshub:latest
+        # two ways to enable puppeteer:
+        # * comment out marked lines, then use this image instead: diygod/rsshub:chromium-bundled
+        # * (consumes more disk space and memory) leave everything unchanged
+        image: diygod/rsshub # or ghcr.io/diygod/rsshub
         restart: always
         ports:
             - '1200:1200'
@@ -9,11 +11,8 @@ services:
             NODE_ENV: production
             CACHE_TYPE: redis
             REDIS_URL: 'redis://redis:6379/'
-            # 关键：强制 RSSHub 去连旁边的 browserless 容器
-            PUPPETEER_WS_ENDPOINT: 'ws://browserless:3000'
-            PUPPETEER_REAL_BROWSER_SERVICE: 'http://real-browser:3000'
-            # 告诉它跳过本地下载和检查
-            PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: 'true'
+            PUPPETEER_WS_ENDPOINT: 'ws://browserless:3000' # marked
+            PUPPETEER_REAL_BROWSER_SERVICE: 'http://real-browser:3000' # marked
         healthcheck:
             test: ['CMD', 'curl', '-f', 'http://localhost:1200/healthz']
             interval: 30s
@@ -21,32 +20,31 @@ services:
             retries: 3
         depends_on:
             - redis
-            - browserless
-            - real-browser
+            - browserless # marked
 
     real-browser:
         image: ghcr.io/hyoban/puppeteer-real-browser-hono
         restart: always
-        # 如果你不需要从外面直接访问它，可以删掉 ports 节省端口
+        ports:
+            - '3001:3000'
         healthcheck:
             test: ['CMD', 'curl', '-f', 'http://localhost:3000']
             interval: 30s
             timeout: 10s
             retries: 3
 
-    browserless:
-        # 使用最新的 browserless 镜像，它会自动匹配最新的 Chrome
-        image: browserless/chrome:latest
-        restart: always
-        ulimits:
-            core:
-                hard: 0
-                soft: 0
-        healthcheck:
-            test: ['CMD', 'curl', '-f', 'http://localhost:3000/pressure']
-            interval: 30s
-            timeout: 10s
-            retries: 3
+    browserless: # marked
+        image: browserless/chrome # marked
+        restart: always # marked
+        ulimits: # marked
+            core: # marked
+                hard: 0 # marked
+                soft: 0 # marked
+        healthcheck: # marked
+            test: ['CMD', 'curl', '-f', 'http://localhost:3000/pressure'] # marked
+            interval: 30s # marked
+            timeout: 10s # marked
+            retries: 3 # marked
 
     redis:
         image: redis:alpine
