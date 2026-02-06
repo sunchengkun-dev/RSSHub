@@ -13,6 +13,11 @@ services:
             REDIS_URL: 'redis://redis:6379/'
             PUPPETEER_WS_ENDPOINT: 'ws://browserless:3000' # marked
             PUPPETEER_REAL_BROWSER_SERVICE: 'http://real-browser:3000' # marked
+            # === 关键添加开始 ===
+            PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: true
+            PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+            PUPPETEER_CACHE_DIR: /app/node_modules/.cache/puppeteer
+            # === 关键添加结束 ===
         healthcheck:
             test: ['CMD', 'curl', '-f', 'http://localhost:1200/healthz']
             interval: 30s
