@@ -1,12 +1,13 @@
 import { load } from 'cheerio';
 
-import type { DataItem } from '@/types'; // 导入类型定义
+import type { DataItem } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
 const handler = async () => {
-    const baseUrl = 'http://c.biancheng.net';
+    // 1. 建议统一使用 https，减少重定向和安全报错
+    const baseUrl = 'https://c.biancheng.net';
     const targetUrl = `${baseUrl}/sitemap/`;
 
     const response = await got(targetUrl);
@@ -16,9 +17,11 @@ const handler = async () => {
         .toArray()
         .map((item) => {
             const $item = $(item);
+            const rawHref = $item.attr('href') || '';
             return {
-                title: $item.text(),
-                link: new URL($item.attr('href') || '', baseUrl).href,
+                title: $item.text().trim(),
+                // 确保 link 是绝对路径
+                link: rawHref.startsWith('http') ? rawHref : new URL(rawHref, baseUrl).href,
             };
         });
 
@@ -28,38 +31,38 @@ const handler = async () => {
                 const detailResponse = await got(item.link);
                 const $detail = load(detailResponse.data);
 
-                // 修复：使用正确的选择器 #arc-body 提取文章正文
-                const description = $detail('#arc-body').html() || '无内容';
-                
-                // 修复日期解析问题
+                // 2. 优化正文：处理相对路径图片
+                const $content = $detail('#arc-body');
+
+                // 将所有图片的相对地址转换为绝对地址
+                $content.find('img').each((_, img) => {
+                    const src = $detail(img).attr('src');
+                    if (src && !src.startsWith('http')) {
+                        $detail(img).attr('src', new URL(src, baseUrl).href);
+                    }
+                });
+
+                const description = $content.html() || '内容获取失败';
+
                 let pubDate;
                 try {
-                    // 尝试多种选择器获取日期
-                    const dateText = $detail('.info .time').text() || 
-                                    $detail('.post-time').text() ||
-                                    $detail('.date').text() ||
-                                    $detail('meta[property="article:published_time"]').attr('content') ||
-                                    $detail('meta[name="publish-date"]').attr('content');
-                    
-                    if (dateText) {
-                        // 清理日期文本，提取日期部分
-                        const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/) || 
-                                         dateText.match(/\d{4}\/\d{2}\/\d{2}/);
-                        
-                        if (dateMatch) {
-                            pubDate = parseDate(dateMatch[0]);
-                        } else {
-                            // 尝试直接解析
-                            pubDate = parseDate(dateText);
-                        }
+                    // 更加健壮的日期提取
+                    const infoText = $detail('.info, .info-x, #arc-info').text();
+                    const dateMatch = infoText.match(/\d{4}-\d{2}-\d{2}/);
+
+                    if (dateMatch) {
+                        pubDate = parseDate(dateMatch[0]);
+                    } else {
+                        // 尝试从 meta 标签获取
+                        const metaDate = $detail('meta[property="article:published_time"]').attr('content');
+                        pubDate = metaDate ? parseDate(metaDate) : new Date();
                     }
-                    
-                    // 如果还是无法解析，使用当前日期
-                    if (!pubDate || isNaN(pubDate.getTime())) {
-                        pubDate = new Date();
-                    }
-                } catch (error) {
-                    // 如果解析出错，使用当前日期
+                } catch {
+                    pubDate = new Date();
+                }
+
+                // 强制校验 Date 对象有效性
+                if (!pubDate || Number.isNaN(pubDate.getTime())) {
                     pubDate = new Date();
                 }
 
@@ -67,7 +70,7 @@ const handler = async () => {
                     title: item.title,
                     link: item.link,
                     description,
-                    pubDate: pubDate,
+                    pubDate,
                 } as DataItem;
             })
         )
@@ -76,10 +79,8 @@ const handler = async () => {
     return {
         title: 'C语言中文网 - 最近更新',
         link: targetUrl,
-        description: 'C语言中文网 - 最近更新 - Powered by RSSHub',
-        item: items,
-        lastBuildDate: new Date().toUTCString(), // 添加最后构建时间
-        ttl: 60, // 设置缓存时间（分钟）
+        item: items.filter((i) => i !== null),
+        // lastBuildDate 和 ttl 通常不需要手动写，RSSHub 框架会自动根据全局配置生成
     };
 };
 
