@@ -1,74 +1,130 @@
+import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 
 import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
+import logger from '@/utils/logger';
+
+// 提取常量
+const ROOT_URL = 'https://c.biancheng.net';
+const SELECTORS = {
+    RECENT_UPDATE_LIST: '#recent-update li',
+    CONTENT: '#arc-body',
+    REMOVE_ELEMENTS: 'script, style, .pre-next, #ad-arc-top, #ad-arc-bottom',
+};
+
+// 提取工具函数
+const cleanContent = ($: CheerioAPI, selector: string): string | undefined => {
+    const $content = $(selector);
+    $content.find(SELECTORS.REMOVE_ELEMENTS).remove();
+    return $content.html() || undefined;
+};
+
+const validateUrl = (href: string | undefined, baseUrl: string): string | null => {
+    if (!href) {
+        return null;
+    }
+    try {
+        return new URL(href, baseUrl).href;
+    } catch {
+        return null;
+    }
+};
 
 export const route: Route = {
-    path: '/sitemap',
+    path: '/sitemap/:limit?', // 支持自定义数量
     name: '最新更新',
-    categories: ['program-language'],
-    example: '/biancheng/sitemap',
+    categories: ['programming'], // 更准确的分类
+    example: '/biancheng/sitemap/15',
+    parameters: {
+        limit: '获取的文章数量，默认为10',
+    },
     maintainers: ['nczitzk'],
     handler,
     features: {
+        requireConfig: false,
         requirePuppeteer: false,
         antiCrawler: true,
+        supportBT: false,
+        supportPodcast: false,
+        supportScihub: false,
     },
+    radar: [
+        {
+            source: ['c.biancheng.net/sitemap/'],
+            target: '/sitemap',
+        },
+    ],
+    description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
+    url: 'https://c.biancheng.net/sitemap/',
 };
 
-async function handler() {
-    const rootUrl = 'https://c.biancheng.net';
-    const currentUrl = `${rootUrl}/sitemap/`;
+async function handler(ctx) {
+    const currentUrl = `${ROOT_URL}/sitemap/`;
+    const limit = ctx.req.param('limit') ? Number.parseInt(ctx.req.param('limit')) : 10;
 
-    const response = await got({
-        method: 'get',
-        url: currentUrl,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-    });
-
-    const $ = load(response.data);
-
-    const list = $('#recent-update li')
-        .toArray()
-        .slice(0, 10)
-        .map((el) => {
-            const $a = $(el).find('a');
-            const link = new URL($a.attr('href') || '', rootUrl).href;
-            return {
-                title: $a.text().trim(),
-                link,
-            } as DataItem;
+    try {
+        const response = await got({
+            method: 'get',
+            url: currentUrl,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
         });
 
-    const items = await Promise.all(
-        list.map((item) =>
-            cache.tryGet(item.link!, async () => {
-                const detailResponse = await got({
-                    method: 'get',
-                    url: item.link,
-                    headers: {
-                        Referer: currentUrl,
-                    },
-                });
+        const $ = load(response.data);
 
-                const $d = load(detailResponse.data);
-                const $content = $d('#arc-body');
+        const list = $(SELECTORS.RECENT_UPDATE_LIST)
+            .toArray()
+            .slice(0, limit)
+            .map((el) => {
+                // 修复 unicorn/no-array-callback-reference 警告
+                const $element = $(el);
+                const $a = $element.find('a');
+                const link = validateUrl($a.attr('href'), ROOT_URL);
 
-                $content.find('script, style, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
+                if (!link) {
+                    return null;
+                }
 
-                item.description = $content.html() || undefined;
-
-                return item;
+                return {
+                    title: $a.text().trim(),
+                    link,
+                } as DataItem;
             })
-        )
-    );
+            .filter(Boolean) as DataItem[];
 
-    return {
-        title: 'C语言中文网 - 最近更新',
-        link: currentUrl,
-        item: items as DataItem[],
-    };
+        const items = await Promise.all(
+            list.map((item) =>
+                cache.tryGet(item.link!, async () => {
+                    try {
+                        const detailResponse = await got({
+                            method: 'get',
+                            url: item.link,
+                            headers: {
+                                Referer: currentUrl,
+                            },
+                        });
+
+                        const $d = load(detailResponse.data);
+                        item.description = cleanContent($d, SELECTORS.CONTENT);
+                        return item;
+                    } catch (error) {
+                        // 修复 no-console 错误，使用 logger 替代 console
+                        logger.error(`Failed to fetch ${item.link}:`, error);
+                        return item;
+                    }
+                })
+            )
+        );
+
+        return {
+            title: 'C语言中文网 - 最近更新',
+            link: currentUrl,
+            item: items as DataItem[],
+        };
+    } catch (error) {
+        throw new Error(`Failed to fetch sitemap: ${error.message}`);
+    }
 }
