@@ -110,9 +110,12 @@ export const route: Route = {
     categories: ['programming'], // 更准确的分类
     example: '/biancheng/sitemap/15',
     parameters: {
-        limit: '获取的文章数量，默认为10',
+        limit: {
+            description: '获取的文章数量，默认为10',
+            default: '10',
+        },
     },
-    maintainers: ['nczitzk'],
+    maintainers: ['sunchnegkun-dev'],
     handler, // 引用已定义的 handler 函数
     features: {
         requireConfig: false,
