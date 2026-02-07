@@ -1,3 +1,4 @@
+console.log('BASE_URL_ENV:', process.env.BASE_URL);
 import { load } from 'cheerio';
 
 import type { DataItem } from '@/types';
