@@ -81,7 +81,8 @@ const handler = async () => {
         title: 'C语言中文网 - 最近更新',
         link: targetUrl,
         item: items.filter((i) => i !== null),
-        // lastBuildDate 和 ttl 通常不需要手动写，RSSHub 框架会自动根据全局配置生成
+        // 强制声明允许的域
+        allowEmpty: false,
     };
 };
 
