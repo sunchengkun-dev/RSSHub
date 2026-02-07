@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 
 import type { DataItem } from '@/types';
-import cache from '@/utils/cache'; // 引入全局缓存模块
+import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
@@ -11,28 +11,36 @@ const handler = async () => {
 
     const requestConfig = {
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            Referer: baseUrl,
+            // 1. 使用极其真实的 UA
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            Referer: 'https://www.google.com/', // 模拟从搜索引擎进入，有时能绕过拦截
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
         },
-        timeout: 20000,
-        https: { rejectUnauthorized: false },
+        timeout: 25000,
+        https: {
+            rejectUnauthorized: false,
+            // 2. 强制指定加密套件，模拟现代浏览器，这是绕过 Cloudflare 的关键
+            ciphers: 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256',
+        },
+        // 3. 必须为 false，因为 Node 的 HTTP/2 指纹极其明显
         http2: false,
     };
 
-    // 1. 获取列表页
     const response = await got(targetUrl, requestConfig);
     const $ = load(response.data);
 
-    // 2. 解析基本信息
+    // ... 解析逻辑保持不变 ...
     const list = $('#recent-update li')
         .toArray()
         .slice(0, 10)
         .map((el) => {
             const $li = $(el);
             const $a = $li.find('a');
-            const rawLink = $a.attr('href') || '';
-            const link = rawLink.startsWith('http') ? rawLink : new URL(rawLink, baseUrl).href;
-
+            const link = new URL($a.attr('href') || '', baseUrl).href;
             return {
                 title: $a.text().trim(),
                 link,
@@ -40,34 +48,18 @@ const handler = async () => {
             } as DataItem;
         });
 
-    // 3. 使用全局 cache.tryGet 抓取全文
     const items = (await Promise.all(
         list.map((item) =>
             cache.tryGet(item.link as string, async () => {
                 try {
+                    // 详情页请求也使用同样的配置
                     const detailResponse = await got(item.link as string, requestConfig);
                     const $detail = load(detailResponse.data);
-
-                    // 选择正文容器
                     const content = $detail('#arc-body');
-
-                    // 移除干扰元素：脚本、翻页、广告
-                    content.find('script, .pre-next, #ad-arc-top, #ad-arc-bottom, .p-ad').remove();
-
-                    // 处理图片：如果图片加载不出，通常需要处理 lazyload 属性
-                    content.find('img').each((_, img) => {
-                        const $img = $detail(img);
-                        const realSrc = $img.attr('data-src') || $img.attr('src');
-                        if (realSrc) {
-                            $img.attr('src', realSrc);
-                            $img.removeAttr('data-src');
-                        }
-                    });
-
+                    content.find('script, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
                     item.description = content.html() || '内容为空';
                     return item;
-                } catch (error) {
-                    item.description = `全文抓取失败: ${error}`;
+                } catch {
                     return item;
                 }
             })
