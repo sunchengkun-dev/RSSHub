@@ -1,32 +1,41 @@
+import path from 'node:path';
+
 import { load } from 'cheerio';
+// eslint-disable-next-line n/no-extraneous-import
+import puppeteer from 'puppeteer-core';
 
 import type { DataItem } from '@/types';
 import cache from '@/utils/cache';
-import puppeteer from '@/utils/puppeteer';
 
 const handler = async () => {
     const baseUrl = 'https://c.biancheng.net';
     const targetUrl = `${baseUrl}/sitemap/`;
+    const isProd = !!process.env.PUPPETEER_WS_ENDPOINT;
 
-    // 关键点：在标准配置下，直接调用 puppeteer()
-    // 它会自动识别环境变量中的 PUPPETEER_WS_ENDPOINT 并连接到 browserless 容器
-    const browser = await puppeteer();
-    const page = await browser.newPage();
+    let browser;
+    if (isProd) {
+        // --- 生产环境：连接到远程 Browserless ---
+        browser = await puppeteer.connect({
+            browserWSEndpoint: process.env.PUPPETEER_WS_ENDPOINT,
+        });
+    } else {
+        // --- 本地环境：自动探测路径 + 隐私保护 ---
+        const chromeRelativePath = path.join('node_modules', '.cache', 'puppeteer', 'chrome', 'win64-145.0.7632.46', 'chrome-win64', 'chrome.exe');
+        const executablePath = process.env.LOCAL_CHROME_PATH || path.join(process.cwd(), chromeRelativePath);
+
+        browser = await puppeteer.launch({
+            executablePath,
+            args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+            headless: true,
+        });
+    }
 
     try {
-        // 设置一个真实的 UA
+        const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-        // 建议加上 Referer 绕过某些防火墙
-        await page.setExtraHTTPHeaders({
-            Referer: 'https://c.biancheng.net/',
-        });
-
-        await page.goto(targetUrl, {
-            waitUntil: 'networkidle2',
-            timeout: 60000,
-        });
-
+        // 1. 抓取列表页
+        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
         const html = await page.content();
         const $ = load(html);
 
@@ -34,15 +43,14 @@ const handler = async () => {
             .toArray()
             .slice(0, 10)
             .map((el) => {
-                const $li = $(el);
-                const $a = $li.find('a');
+                const $a = $(el).find('a');
                 return {
                     title: $a.text().trim(),
                     link: new URL($a.attr('href') || '', baseUrl).href,
                 } as DataItem;
             });
 
-        // 获取全文逻辑（同样利用 browser 实例）
+        // 2. 抓取详情页全文
         const items = await Promise.all(
             list.map((item) =>
                 cache.tryGet(item.link as string, async () => {
@@ -50,13 +58,16 @@ const handler = async () => {
                     try {
                         await detailPage.goto(item.link as string, { waitUntil: 'domcontentloaded', timeout: 30000 });
                         const detailHtml = await detailPage.content();
-                        const $detail = load(detailHtml);
-                        const content = $detail('#arc-body');
-                        content.find('script, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
+                        const $d = load(detailHtml);
+
+                        const content = $d('#arc-body');
+                        // 清理正文中的广告和脚本
+                        content.find('script, style, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
+
                         item.description = content.html() || '内容获取失败';
                         return item;
-                    } catch {
-                        return item;
+                    } catch (error) {
+                        return { ...item, description: `详情页加载失败: ${error}` };
                     } finally {
                         await detailPage.close();
                     }
@@ -65,15 +76,15 @@ const handler = async () => {
         );
 
         return {
-            title: 'C语言中文网 - 生产版',
+            title: 'C语言中文网 - 最近更新',
             link: targetUrl,
             item: items,
         };
     } finally {
-        await page.close();
-        // 生产环境通常不建议在这里 browser.close()，
-        // 因为 RSSHub 的封装层会自动处理连接释放。
-        // 如果你一定要关，确保不会影响到其他并发请求。
+        if (browser) {
+            // 生产环境断开连接，本地环境彻底关闭
+            isProd ? await browser.disconnect() : await browser.close();
+        }
     }
 };
 
