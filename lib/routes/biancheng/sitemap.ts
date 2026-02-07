@@ -1,5 +1,6 @@
 import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
+import type { Context } from 'hono';
 
 import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
@@ -32,35 +33,8 @@ const validateUrl = (href: string | undefined, baseUrl: string): string | null =
     }
 };
 
-export const route: Route = {
-    path: '/sitemap/:limit?', // 支持自定义数量
-    name: '最新更新',
-    categories: ['programming'], // 更准确的分类
-    example: '/biancheng/sitemap/15',
-    parameters: {
-        limit: '获取的文章数量，默认为10',
-    },
-    maintainers: ['nczitzk'],
-    handler,
-    features: {
-        requireConfig: false,
-        requirePuppeteer: false,
-        antiCrawler: true,
-        supportBT: false,
-        supportPodcast: false,
-        supportScihub: false,
-    },
-    radar: [
-        {
-            source: ['c.biancheng.net/sitemap/'],
-            target: '/sitemap',
-        },
-    ],
-    description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
-    url: 'https://c.biancheng.net/sitemap/',
-};
-
-async function handler(ctx) {
+// 先定义 handler 函数
+async function handler(ctx: Context) {
     const currentUrl = `${ROOT_URL}/sitemap/`;
     const limit = ctx.req.param('limit') ? Number.parseInt(ctx.req.param('limit')) : 10;
 
@@ -128,3 +102,32 @@ async function handler(ctx) {
         throw new Error(`Failed to fetch sitemap: ${error.message}`);
     }
 }
+
+// 后定义并导出 route 对象
+export const route: Route = {
+    path: '/sitemap/:limit?', // 支持自定义数量
+    name: '最新更新',
+    categories: ['programming'], // 更准确的分类
+    example: '/biancheng/sitemap/15',
+    parameters: {
+        limit: '获取的文章数量，默认为10',
+    },
+    maintainers: ['nczitzk'],
+    handler, // 引用已定义的 handler 函数
+    features: {
+        requireConfig: false,
+        requirePuppeteer: false,
+        antiCrawler: true,
+        supportBT: false,
+        supportPodcast: false,
+        supportScihub: false,
+    },
+    radar: [
+        {
+            source: ['c.biancheng.net/sitemap/'],
+            target: '/sitemap',
+        },
+    ],
+    description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
+    url: 'https://c.biancheng.net/sitemap/',
+};
