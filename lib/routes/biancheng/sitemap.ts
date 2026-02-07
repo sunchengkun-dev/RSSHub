@@ -1,4 +1,3 @@
-import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 
 import type { DataItem } from '@/types';
@@ -11,36 +10,22 @@ const headers = {
     Referer: 'https://c.biancheng.net/',
 };
 
-const parseDetail = ($: CheerioAPI, baseUrl: string) => {
-    const $content = $('#arc-body');
-    if (!$content.length) {
-        return '内容解析失败';
-    }
-    $content.find('img').each((_, img) => {
-        const src = $(img).attr('src');
-        if (src) {
-            const absoluteUrl = new URL(src, baseUrl).href;
-            $(img).attr('src', absoluteUrl.replace(/^http:\/\//i, 'https://'));
-        }
-    });
-    return $content.html() || '正文为空';
-};
-
 const handler = async () => {
     const baseUrl = 'https://c.biancheng.net';
     const targetUrl = `${baseUrl}/sitemap/`;
 
+    // 1. 获取列表页
     const response = await got(targetUrl, {
         headers,
         https: { rejectUnauthorized: false },
     });
     const $ = load(response.data);
 
+    // 2. 限制条数到 5 条，极大降低内存占用和 500 概率
     const list = $('#recent-update li')
         .toArray()
-        .slice(0, 10)
+        .slice(0, 5)
         .map((el) => {
-            // 限制前10条，防止并发过高
             const $li = $(el);
             const $a = $li.find('a');
             return {
@@ -50,18 +35,20 @@ const handler = async () => {
             };
         });
 
+    // 3. 详情页处理：增加 null 检查，防止 cache 穿透
     const items = await Promise.all(
         list.map((item) =>
             cache.tryGet(item.link, async () => {
                 try {
-                    const { data } = await got(item.link, {
-                        headers,
-                        timeout: { request: 5000 }, // 设置超时
-                    });
-                    return { ...item, description: parseDetail(load(data), baseUrl) };
+                    const detailRes = await got(item.link, { headers, timeout: { request: 3000 } });
+                    const $detail = load(detailRes.data);
+                    const content = $detail('#arc-body').html() || '正文解析失败';
+                    return {
+                        ...item,
+                        description: content,
+                    };
                 } catch {
-                    // 如果单篇文章获取失败，不让整个路由报 500，而是返回标题和链接
-                    return { ...item, description: '该文章详情内容获取失败，请点击原链接阅读。' };
+                    return { ...item, description: '内容加载超时' };
                 }
             })
         )
