@@ -14,17 +14,16 @@ const handler = async () => {
     const baseUrl = 'https://c.biancheng.net';
     const targetUrl = `${baseUrl}/sitemap/`;
 
-    // 1. 获取列表页
     const response = await got(targetUrl, {
         headers,
         https: { rejectUnauthorized: false },
+        timeout: { request: 20000 },
     });
     const $ = load(response.data);
 
-    // 2. 限制条数到 5 条，极大降低内存占用和 500 概率
     const list = $('#recent-update li')
         .toArray()
-        .slice(0, 5)
+        .slice(0, 10)
         .map((el) => {
             const $li = $(el);
             const $a = $li.find('a');
@@ -35,29 +34,38 @@ const handler = async () => {
             };
         });
 
-    // 3. 详情页处理：增加 null 检查，防止 cache 穿透
-    const items = await Promise.all(
-        list.map((item) =>
-            cache.tryGet(item.link, async () => {
-                try {
-                    const detailRes = await got(item.link, { headers, timeout: { request: 3000 } });
-                    const $detail = load(detailRes.data);
-                    const content = $detail('#arc-body').html() || '正文解析失败';
-                    return {
-                        ...item,
-                        description: content,
-                    };
-                } catch {
-                    return { ...item, description: '内容加载超时' };
-                }
-            })
-        )
-    );
+    const items: DataItem[] = [];
+    for (const item of list) {
+        // eslint-disable-next-line no-await-in-loop
+        const cachedItem = (await cache.tryGet(item.link, async () => {
+            try {
+                const detailRes = await got(item.link, {
+                    headers,
+                    timeout: { request: 15000 },
+                    retry: { limit: 2 },
+                });
+                const $detail = load(detailRes.data);
+                const content = $detail('#arc-body').html() || '正文解析失败';
+                return {
+                    ...item,
+                    description: content,
+                };
+            } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error(`Fetch detail fail for ${item.link}:`, error);
+                return { ...item, description: `内容加载失败` };
+            }
+        })) as DataItem;
+
+        if (cachedItem) {
+            items.push(cachedItem);
+        }
+    }
 
     return {
         title: 'C语言中文网 - 最近更新',
         link: targetUrl,
-        item: items.filter((i): i is DataItem => i !== null),
+        item: items,
     };
 };
 
