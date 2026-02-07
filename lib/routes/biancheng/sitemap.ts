@@ -1,8 +1,6 @@
 import path from 'node:path';
 
 import { load } from 'cheerio';
-// eslint-disable-next-line n/no-extraneous-import
-import puppeteer from 'puppeteer-core';
 
 import type { DataItem } from '@/types';
 import cache from '@/utils/cache';
@@ -12,18 +10,31 @@ const handler = async () => {
     const targetUrl = `${baseUrl}/sitemap/`;
     const isProd = !!process.env.PUPPETEER_WS_ENDPOINT;
 
+    let puppeteerModule;
+    try {
+        const name1 = 'puppeteer-core';
+        puppeteerModule = await import(name1);
+    } catch {
+        try {
+            const name2 = 'rebrowser-puppeteer-core';
+            // @ts-ignore
+            puppeteerModule = await import(name2);
+        } catch {
+            throw new Error('Puppeteer library not found.');
+        }
+    }
+    const p = puppeteerModule.default || puppeteerModule;
+
     let browser;
     if (isProd) {
-        // --- 生产环境：连接到远程 Browserless ---
-        browser = await puppeteer.connect({
+        browser = await p.connect({
             browserWSEndpoint: process.env.PUPPETEER_WS_ENDPOINT,
         });
     } else {
-        // --- 本地环境：自动探测路径 + 隐私保护 ---
         const chromeRelativePath = path.join('node_modules', '.cache', 'puppeteer', 'chrome', 'win64-145.0.7632.46', 'chrome-win64', 'chrome.exe');
         const executablePath = process.env.LOCAL_CHROME_PATH || path.join(process.cwd(), chromeRelativePath);
 
-        browser = await puppeteer.launch({
+        browser = await p.launch({
             executablePath,
             args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
             headless: true,
@@ -34,7 +45,6 @@ const handler = async () => {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-        // 1. 抓取列表页
         await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
         const html = await page.content();
         const $ = load(html);
@@ -50,7 +60,6 @@ const handler = async () => {
                 } as DataItem;
             });
 
-        // 2. 抓取详情页全文
         const items = await Promise.all(
             list.map((item) =>
                 cache.tryGet(item.link as string, async () => {
@@ -59,15 +68,13 @@ const handler = async () => {
                         await detailPage.goto(item.link as string, { waitUntil: 'domcontentloaded', timeout: 30000 });
                         const detailHtml = await detailPage.content();
                         const $d = load(detailHtml);
-
                         const content = $d('#arc-body');
-                        // 清理正文中的广告和脚本
                         content.find('script, style, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
 
                         item.description = content.html() || '内容获取失败';
                         return item;
-                    } catch (error) {
-                        return { ...item, description: `详情页加载失败: ${error}` };
+                    } catch {
+                        return { ...item, description: '详情页抓取超时' };
                     } finally {
                         await detailPage.close();
                     }
@@ -82,8 +89,7 @@ const handler = async () => {
         };
     } finally {
         if (browser) {
-            // 生产环境断开连接，本地环境彻底关闭
-            isProd ? await browser.disconnect() : await browser.close();
+            await (isProd ? browser.disconnect() : browser.close());
         }
     }
 };
