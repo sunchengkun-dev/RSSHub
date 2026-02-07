@@ -8,19 +8,20 @@ const handler = async () => {
     const baseUrl = 'https://c.biancheng.net';
     const targetUrl = `${baseUrl}/sitemap/`;
 
-    // 1. 使用 RSSHub 封装的 puppeteer，它在生产环境下会自动找到 Chromium 路径
-    // 同时保留你测试成功的关键参数
-    const browser = await puppeteer({
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
-    });
-
+    // 关键点：在标准配置下，直接调用 puppeteer()
+    // 它会自动识别环境变量中的 PUPPETEER_WS_ENDPOINT 并连接到 browserless 容器
+    const browser = await puppeteer();
     const page = await browser.newPage();
 
     try {
-        // 2. 模拟真实浏览器特征
+        // 设置一个真实的 UA
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-        // 3. 访问列表页
+        // 建议加上 Referer 绕过某些防火墙
+        await page.setExtraHTTPHeaders({
+            Referer: 'https://c.biancheng.net/',
+        });
+
         await page.goto(targetUrl, {
             waitUntil: 'networkidle2',
             timeout: 60000,
@@ -35,15 +36,14 @@ const handler = async () => {
             .map((el) => {
                 const $li = $(el);
                 const $a = $li.find('a');
-                const link = new URL($a.attr('href') || '', baseUrl).href;
                 return {
                     title: $a.text().trim(),
-                    link,
+                    link: new URL($a.attr('href') || '', baseUrl).href,
                 } as DataItem;
             });
 
-        // 4. 递归抓取全文（带缓存控制）
-        const items = (await Promise.all(
+        // 获取全文逻辑（同样利用 browser 实例）
+        const items = await Promise.all(
             list.map((item) =>
                 cache.tryGet(item.link as string, async () => {
                     const detailPage = await browser.newPage();
@@ -51,33 +51,29 @@ const handler = async () => {
                         await detailPage.goto(item.link as string, { waitUntil: 'domcontentloaded', timeout: 30000 });
                         const detailHtml = await detailPage.content();
                         const $detail = load(detailHtml);
-
                         const content = $detail('#arc-body');
                         content.find('script, .pre-next, #ad-arc-top, #ad-arc-bottom').remove();
-
                         item.description = content.html() || '内容获取失败';
                         return item;
-                    } catch (error) {
-                        item.description = `详情页抓取失败: ${error}`;
+                    } catch {
                         return item;
                     } finally {
                         await detailPage.close();
                     }
                 })
             )
-        )) as DataItem[];
+        );
 
         return {
-            title: 'C语言中文网 - 最近更新',
+            title: 'C语言中文网 - 生产版',
             link: targetUrl,
             item: items,
         };
     } finally {
-        // 5. 务必关闭页面，防止内存泄漏
         await page.close();
-        // 注意：在 RSSHub 插件中，通常由系统管理 browser 实例，
-        // 但如果你是手动启动的，建议在 handler 结束前关闭。
-        await browser.close();
+        // 生产环境通常不建议在这里 browser.close()，
+        // 因为 RSSHub 的封装层会自动处理连接释放。
+        // 如果你一定要关，确保不会影响到其他并发请求。
     }
 };
 
