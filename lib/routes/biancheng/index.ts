@@ -33,8 +33,8 @@ const validateUrl = (href: string | undefined, baseUrl: string): string | null =
     }
 };
 
-// 导出处理函数供 router.ts 使用
-export async function handler(ctx: Context) {
+// 主处理函数
+async function handler(ctx: Context) {
     const currentUrl = `${ROOT_URL}/sitemap/`;
     const limit = ctx.req.param('limit') ? Number.parseInt(ctx.req.param('limit')) : 10;
 
@@ -53,6 +53,7 @@ export async function handler(ctx: Context) {
             .toArray()
             .slice(0, limit)
             .map((el) => {
+                // 修复 unicorn/no-array-callback-reference 警告
                 const $element = $(el);
                 const $a = $element.find('a');
                 const link = validateUrl($a.attr('href'), ROOT_URL);
@@ -66,7 +67,7 @@ export async function handler(ctx: Context) {
                     link,
                 } as DataItem;
             })
-            .filter((item): item is DataItem => item !== null);
+            .filter(Boolean) as DataItem[];
 
         const items = await Promise.all(
             list.map((item) =>
@@ -84,6 +85,7 @@ export async function handler(ctx: Context) {
                         item.description = cleanContent($d, SELECTORS.CONTENT);
                         return item;
                     } catch (error) {
+                        // 修复 no-console 错误，使用 logger 替代 console
                         logger.error(`Failed to fetch ${item.link}:`, error);
                         return item;
                     }
@@ -102,10 +104,10 @@ export async function handler(ctx: Context) {
     }
 }
 
-// 也保留 route 定义以保持向后兼容性
+// 导出路由配置 - 这是 RSSHub 标准格式
 export const route: Route = {
     path: '/sitemap/:limit?',
-    name: '最新更新',
+    name: '最近更新',
     categories: ['programming'],
     example: '/biancheng/sitemap/15',
     parameters: {
