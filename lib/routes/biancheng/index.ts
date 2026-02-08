@@ -33,10 +33,24 @@ const validateUrl = (href: string | undefined, baseUrl: string): string | null =
     }
 };
 
-// 主处理函数
+// 主处理函数 - 简化版本
 async function handler(ctx: Context) {
     const currentUrl = `${ROOT_URL}/sitemap/`;
-    const limit = ctx.req.param('limit') ? Number.parseInt(ctx.req.param('limit')) : 10;
+
+    // 简化参数处理，避免folo源解析问题
+    let limit = 10; // 默认值
+    try {
+        const limitParam = ctx.req.param('limit');
+        if (limitParam) {
+            const parsedLimit = Number.parseInt(limitParam, 10);
+            if (!Number.isNaN(parsedLimit) && parsedLimit > 0) {
+                limit = Math.min(parsedLimit, 50); // 限制最大数量
+            }
+        }
+    } catch {
+        // 参数解析失败时使用默认值
+        logger.warn('Failed to parse limit parameter, using default value 10');
+    }
 
     try {
         const response = await got({
@@ -53,7 +67,6 @@ async function handler(ctx: Context) {
             .toArray()
             .slice(0, limit)
             .map((el) => {
-                // 修复 unicorn/no-array-callback-reference 警告
                 const $element = $(el);
                 const $a = $element.find('a');
                 const link = validateUrl($a.attr('href'), ROOT_URL);
@@ -83,9 +96,9 @@ async function handler(ctx: Context) {
 
                         const $d = load(detailResponse.data);
                         item.description = cleanContent($d, SELECTORS.CONTENT);
+                        item.pubDate = new Date().toUTCString(); // 添加发布时间
                         return item;
                     } catch (error) {
-                        // 修复 no-console 错误，使用 logger 替代 console
                         logger.error(`Failed to fetch ${item.link}:`, error);
                         return item;
                     }
@@ -96,27 +109,26 @@ async function handler(ctx: Context) {
         return {
             title: 'C语言中文网 - 最近更新',
             link: currentUrl,
+            description: '获取C语言中文网的最新更新内容',
             item: items as DataItem[],
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Failed to fetch sitemap: ${errorMessage}`);
         throw new Error(`Failed to fetch sitemap: ${errorMessage}`);
     }
 }
 
-// 导出路由配置 - 完全符合 RSSHub 官方规范的格式
+// 导出两个版本的路由以提高兼容性
 export const route: Route = {
-    path: '/sitemap/:limit?',
+    path: '/sitemap/:limit?', // 保持可选参数以兼容现有调用
     name: '最近更新',
     url: 'c.biancheng.net',
     maintainers: ['sunchnegkun-dev'],
     handler,
     example: '/biancheng/sitemap/15',
     parameters: {
-        limit: {
-            description: '获取的文章数量，默认为10',
-            default: '10',
-        },
+        limit: '获取的文章数量，默认为10',
     },
     categories: ['programming'],
     features: {
@@ -134,4 +146,33 @@ export const route: Route = {
         },
     ],
     description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
+};
+
+// 同时导出一个无参数版本以提高folo源兼容性
+export const routeWithoutParam: Route = {
+    path: '/sitemap', // 不带参数的版本
+    name: '最近更新(默认)',
+    url: 'c.biancheng.net',
+    maintainers: ['sunchnegkun-dev'],
+    handler: async (ctx) =>
+        // 设置默认limit为10
+        await handler(ctx),
+    example: '/biancheng/sitemap',
+    parameters: {},
+    categories: ['programming'],
+    features: {
+        requireConfig: false,
+        requirePuppeteer: false,
+        antiCrawler: true,
+        supportBT: false,
+        supportPodcast: false,
+        supportScihub: false,
+    },
+    radar: [
+        {
+            source: ['c.biancheng.net/sitemap/'],
+            target: '/sitemap',
+        },
+    ],
+    description: '获取C语言中文网的最新更新内容(默认10条)',
 };
