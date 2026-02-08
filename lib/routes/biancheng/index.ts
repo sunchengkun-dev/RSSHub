@@ -104,11 +104,13 @@ async function handler(ctx: Context) {
     }
 }
 
-// 导出路由配置 - 这是 RSSHub 标准格式
+// 导出路由配置 - 完全符合 RSSHub 官方规范的格式
 export const route: Route = {
     path: '/sitemap/:limit?',
     name: '最近更新',
-    categories: ['programming'],
+    url: 'c.biancheng.net',
+    maintainers: ['sunchnegkun-dev'],
+    handler,
     example: '/biancheng/sitemap/15',
     parameters: {
         limit: {
@@ -116,8 +118,7 @@ export const route: Route = {
             default: '10',
         },
     },
-    maintainers: ['sunchnegkun-dev'],
-    handler,
+    categories: ['programming'],
     features: {
         requireConfig: false,
         requirePuppeteer: false,
@@ -129,9 +130,8 @@ export const route: Route = {
     radar: [
         {
             source: ['c.biancheng.net/sitemap/'],
-            target: '/sitemap',
+            target: '/sitemap/:limit?',
         },
     ],
     description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
-    url: 'https://c.biancheng.net/sitemap/',
 };
