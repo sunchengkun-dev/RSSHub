@@ -1,16 +1,24 @@
 import type { Route } from '@/types';
 
+// 删除未使用的 Context 导入，修复 @typescript-eslint/no-unused-vars 错误
+// import type { Context } from 'hono';
+// 导入处理函数
+import { handler as sitemapHandler } from './sitemap';
+
 export const route: Route = {
-    path: '/sitemap/:limit?', // 与 sitemap.ts 保持一致
-    categories: ['programming'], // 统一分类
+    path: '/sitemap/:limit?',
+    categories: ['programming'],
     example: '/biancheng/sitemap/15',
     parameters: {
-        limit: '获取的文章数量，默认为10',
+        limit: {
+            description: '获取的文章数量，默认为10',
+            default: '10',
+        },
     },
     features: {
         requireConfig: false,
         requirePuppeteer: false,
-        antiCrawler: true, // 与 sitemap.ts 保持一致
+        antiCrawler: true,
         supportBT: false,
         supportPodcast: false,
         supportScihub: false,
@@ -23,10 +31,7 @@ export const route: Route = {
     ],
     name: '最近更新',
     maintainers: ['sunchnegkun-dev'],
-    handler: async (ctx) => {
-        const { default: handler } = await import('./sitemap');
-        return await handler(ctx); // 传递 ctx 参数
-    },
+    handler: sitemapHandler,
     description: '获取C语言中文网的最新更新内容，支持自定义获取数量',
     url: 'https://c.biancheng.net/sitemap/',
 };

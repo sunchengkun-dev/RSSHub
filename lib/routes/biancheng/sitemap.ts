@@ -33,8 +33,8 @@ const validateUrl = (href: string | undefined, baseUrl: string): string | null =
     }
 };
 
-// 先定义 handler 函数
-async function handler(ctx: Context) {
+// 导出处理函数供 router.ts 使用
+export async function handler(ctx: Context) {
     const currentUrl = `${ROOT_URL}/sitemap/`;
     const limit = ctx.req.param('limit') ? Number.parseInt(ctx.req.param('limit')) : 10;
 
@@ -53,7 +53,6 @@ async function handler(ctx: Context) {
             .toArray()
             .slice(0, limit)
             .map((el) => {
-                // 修复 unicorn/no-array-callback-reference 警告
                 const $element = $(el);
                 const $a = $element.find('a');
                 const link = validateUrl($a.attr('href'), ROOT_URL);
@@ -67,7 +66,7 @@ async function handler(ctx: Context) {
                     link,
                 } as DataItem;
             })
-            .filter(Boolean) as DataItem[];
+            .filter((item): item is DataItem => item !== null);
 
         const items = await Promise.all(
             list.map((item) =>
@@ -85,7 +84,6 @@ async function handler(ctx: Context) {
                         item.description = cleanContent($d, SELECTORS.CONTENT);
                         return item;
                     } catch (error) {
-                        // 修复 no-console 错误，使用 logger 替代 console
                         logger.error(`Failed to fetch ${item.link}:`, error);
                         return item;
                     }
@@ -99,15 +97,16 @@ async function handler(ctx: Context) {
             item: items as DataItem[],
         };
     } catch (error) {
-        throw new Error(`Failed to fetch sitemap: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to fetch sitemap: ${errorMessage}`);
     }
 }
 
-// 后定义并导出 route 对象
+// 也保留 route 定义以保持向后兼容性
 export const route: Route = {
-    path: '/sitemap/:limit?', // 支持自定义数量
+    path: '/sitemap/:limit?',
     name: '最新更新',
-    categories: ['programming'], // 更准确的分类
+    categories: ['programming'],
     example: '/biancheng/sitemap/15',
     parameters: {
         limit: {
@@ -116,7 +115,7 @@ export const route: Route = {
         },
     },
     maintainers: ['sunchnegkun-dev'],
-    handler, // 引用已定义的 handler 函数
+    handler,
     features: {
         requireConfig: false,
         requirePuppeteer: false,
